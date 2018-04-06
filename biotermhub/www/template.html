@@ -1,0 +1,318 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>OntoGene Bio Term Hub</title>
+  <link rel='stylesheet' type='text/css'
+    href='https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css'/>
+  <style>
+    body { background:WhiteSmoke; }
+    td { padding: 0cm 0.2cm 0cm 0.2cm; }
+    a.button {
+      -webkit-appearance: button;
+      -moz-appearance: button;
+      appearance: button;
+      text-decoration: none;
+      color: initial;
+    }
+    .page-heading { padding-bottom:9px; margin:40px 0 20px; }
+    .hidden { display: none; }
+    .visible {}
+    #cell-instructions { width: 550px; padding: 0cm 0.2cm 0cm 1.0cm }
+  </style>
+  <script type="text/javascript">
+    // The "select all" checkbox.
+    function checkAll(bx) {
+      var cbs = document.getElementsByTagName('input');
+      for (var i=cbs.length; i--;) {
+        if (cbs[i].type == 'checkbox' &&
+            cbs[i].name != 'postfilter' &&
+            cbs[i].name != 'zipped') {
+          cbs[i].checked = bx.checked;
+        }
+      }
+    }
+
+    // Expand/collapse advanced settings.
+    function toggle_advanced(name) {
+      var d = document.getElementById('div-' + name),
+          b = document.getElementById('btn-' + name);
+      if (d.getAttribute('class') == 'hidden') {
+        // Expand.
+        d.setAttribute('class', 'visible');
+        b.setAttribute('value', '▼');
+      } else {
+        // Collapse.
+        d.setAttribute('class', 'hidden');
+        b.setAttribute('value', '▶');
+      }
+    }
+
+
+    // AJAX stuff.
+
+    // Actual AJAX mechanism.
+    function ajax_request(fdata, target_node, wait_msg, success, failure, followup) {
+      var xmlhttp = new XMLHttpRequest();
+
+      // Mark this request as originating from AJAX.
+      fdata.append("requested-through", "ajax");
+
+      // Status handling.
+      xmlhttp.onreadystatechange = function() {
+        if (xmlhttp.readyState == 4) {
+          if (xmlhttp.status == 200) {
+            target_node.innerHTML = xmlhttp.responseText;
+            // Success callback.
+            if (typeof(success) !== 'undefined') {
+              success(xmlhttp);
+            }
+          } else if (xmlhttp.status == 202 && typeof(followup) !== 'undefined') {
+            // Follow-up callback.
+            followup();
+          } else {
+            target_node.innerHTML = "Error " + xmlhttp.status + " occurred";
+            // Failure callback.
+            if (typeof(failure) !== 'undefined') {
+              failure();
+            }
+          }
+        } else {
+          target_node.innerHTML = wait_msg;
+        }
+      }
+
+      // Data transmission.
+      xmlhttp.open("POST", '.', true);
+      xmlhttp.timeout = 1800000;  // 30 minutes
+      xmlhttp.send(fdata);
+    }
+
+    // Check if there is an update for this resource.
+    function check_resource(name) {
+      var name = name,  // Make sure this is bound to the local closure.
+          result_div = document.getElementById('div-update-' + name),
+          button = document.getElementById('btn-update-' + name),
+          fdata = new FormData();
+
+      // Callback actions.
+      function success(xhr) {
+        var response = xhr.responseText;
+        if (response == '<p>Up-to-date.</p>') {
+          button.setAttribute('disabled', 'disabled');
+          button.setAttribute('value', '...');
+        } else if (response == '<p>Update available.</p>') {
+          button.removeAttribute('disabled');
+          button.setAttribute('value', 'Update');
+          button.setAttribute('onclick', 'update_resource("' + name + '")');
+        }
+      }
+      function followup() {
+        update_resource(name);
+      }
+      function failure() {
+        button.removeAttribute('disabled');
+        button.setAttribute('value', 'Check again');
+        button.setAttribute('onclick', 'check_resource("' + name + '")');
+      }
+
+      fdata.append('check-request', name);
+      button.setAttribute('disabled', 'disabled');
+      button.setAttribute('value', '...');
+      ajax_request(fdata, result_div, 'Checking for remote changes...',
+                   success, failure, followup);
+    }
+
+    // Post an update request.
+    function update_resource(name) {
+      var result_div = document.getElementById('div-update-' + name),
+          button = document.getElementById('btn-update-' + name),
+          fdata = new FormData();
+
+      fdata.append('update-request', name);
+      button.setAttribute('disabled', 'disabled');
+      button.setAttribute('value', '...');
+      ajax_request(fdata, result_div, 'Updating (might take a few minutes)...');
+    }
+
+    // Callback function to fill in OGER parameters.
+    function oger_button(location) {
+      var description = 'Bio Term Hub ' + new Date().toUTCString(),
+          submit_button = document.getElementById('inp-oger-submit'),
+          desc_param = document.getElementById('inp-oger-description'),
+          settings_param = document.getElementById('inp-oger-settings'),
+          csv_loc = location.substring(0, location.length-3) + 'csv',
+          settings = JSON.stringify({"termlist_path": csv_loc});
+      desc_param.setAttribute('value', description);
+      settings_param.setAttribute('value', settings);
+      submit_button.removeAttribute('disabled');
+    }
+
+    onload = function() {
+      // Place an event listener on the main form.
+      // It suppresses the normal page-replacing request on
+      // form submission.
+      var main_form = document.getElementById('form-res');
+      main_form.addEventListener('submit', function(ev) {
+
+        var result_div = document.getElementById('div-result'),
+            inp_div = document.getElementById('div-input-form'),
+            resp_div = document.getElementById('div-download-page'),
+            fdata = new FormData(main_form);
+
+        // Replace the form div with the response div.
+        inp_div.setAttribute('class', 'hidden');
+        resp_div.setAttribute('class', 'visible');
+
+        // Post the AJAX request.
+        function success(xhr) {
+          var result_loc = result_div.getElementsByTagName('a')[0]['href'];
+          oger_button(result_loc);
+        }
+        ajax_request(fdata, result_div, WAIT_MESSAGE, success);
+
+        // Prevent reloading the page on submit.
+        ev.preventDefault();
+
+      }, false);
+
+      // Check if any resource has been changed since the last update.
+      var resource_names = RESOURCE_NAMES;
+      for (var i=resource_names.length; i--;) {
+        check_resource(resource_names[i]);
+      }
+    }
+  </script>
+</head>
+<body>
+  <center>
+    <h1 class="page-heading">
+      <a href="." style="color: black; text-decoration: none;">
+        OntoGene Bio Term Hub
+      </a>
+    </h1>
+    <p>The Bio Term Hub (BTH) can be used to download selected terminological resources in a simple text format, or it can be used to annotate user-provided text. In both cases, select the desired resources, then press the button <strong>Create resource</strong> at the bottom of the page.</p>
+    <p>The BTH has been developed by the <a href="http://www.ontogene.org/">OntoGene</a>/<a href="http://www.sib.swiss/rinaldi-fabio/">BioMeXT</a> group. For information, requests and suggestions please contact <a href="mailto:rinaldi@cl.uzh.ch?Subject=Bio%20Term%20Hub">Fabio Rinaldi</a>.</p>
+    <hr/>
+  </center>
+  <center>
+    <div id="div-msg"></div>
+    <div style="width: 80%; padding-bottom: 1cm;">
+      <div id="div-input-form">
+        <h3>Resource Selection</h3>
+        <div style="text-align: left">
+          <form id="form-res" role="form" method="post"
+                accept-charset="UTF-8">
+            <div id="div-checkboxes">
+              <label>Please select the resources to be included:</label>
+              <p><input type="checkbox" id="inp-select-all" name="all" onclick="checkAll(this)"/> <em>select all</em></p>
+              <table id="tbl-checkboxes">
+                <tr>
+                  <td id="cell-instructions">
+                    <p>The Bio Term Hub provides access to biomedical terminology resources in a unified format. We envision its main use as a basis for text mining systems.</p>
+                    <p>Select any of the external resources on the left to obtain a custom terminology list. The list is a tab-separated table including terms (names, synonyms), preferred name, concept identifier, entity type, and original resource. The contents of the last two fields can be modified using replacement patterns (uncover the <strong>Renaming</strong> section below using the triangle button). Submit your request with the <strong>Create resource</strong> button at the bottom of the page. Afterwards you will be offered the opportunity to annotate a text with the selected resources.</p>
+                    <p>Aggregating, filtering, reformatting, and optionally renaming all this information takes time. Creation time mainly depends on the size of each resource. Compiling a list of all terminologies except for EntrezGene takes approximately 90&nbsp;seconds; however, EntrezGene is very large, and processing it requires 3 to 4&nbsp;minutes.</p>
+                    <p>The requested terminology list is compiled on the fly, based on local copies of the external terminology resources. Whenever one of the local copies becomes out-of-date with respect to its remote source, an <strong>Update</strong> button is shown next to the corresponding resource name. This button triggers downloading the latest version to our server. Please note that, due to data volume and bandwidth restrictions, updating may take several minutes for some of the resources.</p>
+                  </td>
+                </tr>
+              </table>
+            </div>
+            <hr/>
+            <label>Renaming</label>
+            <input type="button" id="btn-renaming" onclick="toggle_advanced('renaming');" value="▶"/>
+            <div id="div-renaming" class="hidden">
+              <p>Use the following text boxes to change the labeling of resources and entity types.
+                You may use regular expressions (see the examples below).</p>
+              <p>You can define multiple pattern-replacement pairs
+                by using corresponding lines in the left/right box.</p>
+              <div style="float: left; padding-right: .2cm; padding-bottom: .2cm">
+                <label>Resources:</label>
+                <table>
+                  <tr>
+                    <td>
+                      <textarea rows="3" cols="35" name="resource-std" placeholder="[pattern]"></textarea>
+                    </td>
+                    <td>
+                      <textarea rows="3" cols="35" name="resource-custom" placeholder="[replacement]"></textarea>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Example: MeSH.* → MeSH</td>
+                  </tr>
+                </table>
+                <label>Entity types:</label>
+                <table>
+                  <tr>
+                    <td>
+                      <textarea rows="3" cols="35" name="entity_type-std" placeholder="[pattern]"></textarea>
+                    </td>
+                    <td>
+                      <textarea rows="3" cols="35" name="entity_type-custom" placeholder="[replacement]"></textarea>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Example: (organism|species) → organism</td>
+                  </tr>
+                </table>
+              </div>
+              <div style="float: left;">
+                <table>
+                  <tr>
+                    <th>Existing resource labels:</th>
+                    <th>Existing entity-type labels:</th>
+                  </tr>
+                  <tr style="vertical-align: top;">
+                    <td id="td-res-ids"></td>
+                    <td id="td-ent-ids"></td>
+                  </tr>
+                </table>
+              </div>
+              <div style="clear: both"></div>
+            </div>
+            <hr/>
+            <label>Statistics</label>
+            <input type="button" id="btn-statistics" onclick="toggle_advanced('statistics');" value="▶"/>
+            <div id="div-statistics" class="hidden">
+              <p>
+                Send me an e-mail with resource statistics plots:
+                <input type="text" name="plot-email" placeholder="user@example.com" /><br/>
+                (The plots are created and sent around midnight CET.)
+              </p>
+            </div>
+            <hr/>
+            <div style="padding-bottom: .3cm;">
+              <p>
+                <strong>Disclaimer:</strong> The Bio Term Hub is a derivative service providing access to publicly available terminology resources.
+                Licenses and agreements might apply to individual resources;
+                please refer to the original sources.
+              </p>
+              <input type="submit" value="Create resource" />&nbsp;&nbsp;&nbsp;
+              <input type="checkbox" name="zipped" checked="checked" value="true" />&nbsp;download as Zip archive
+            </div>
+          </form>
+        </div>
+      </div>
+      <div id="div-download-page">
+        <center>
+          <h3>Download</h3>
+          <div id="div-result"></div>
+          <hr/>
+          <form id="form-oger" role="form" method="post" accept-charset="UTF-8">
+            <label>Press the following button to use the selected resources for text annotation:</label>
+            <input type="submit" value="Send to OGER" disabled="disabled" id="inp-oger-submit" />
+            <input type="hidden" name="description" id="inp-oger-description" />
+            <input type="hidden" name="settings" id="inp-oger-settings" />
+          </form>
+          <hr/>
+          <a href="." class="button">Back to resource selection</a>
+        </center>
+      </div>
+      <hr/>
+      <div style="width: 500px; text-align: left;">
+        <p>If you use the Bio Term Hub in academic work, please cite the following paper:</p>
+        <p>Ellendorff, Tilia Renate; van der Lek, Adrian; Furrer, Lenz; Rinaldi, Fabio: <a href="http://www.zora.uzh.ch/114510/">A&nbsp;Combined Resource of Biomedical Terminology and its Statistics</a>. In: Poibeau,&nbsp;T., Faber,&nbsp;P. (eds.) <i>Proceedings of the 11th International Conference on Terminology and Artificial Intelligence</i>, Granada, Spain, pp.&nbsp;39&ndash;49 (2015)</p>
+      </div>
+    </div>
+  </center>
+</body>
+</html>
